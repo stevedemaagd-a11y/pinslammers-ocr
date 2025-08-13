@@ -1,0 +1,19 @@
+{
+  "name": "PinSlammers \u2014 Quail Ridge OCR",
+  "short_name": "PinSlammers",
+  "display": "standalone",
+  "background_color": "#0f1626",
+  "theme_color": "#0f1626",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

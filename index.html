@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>PinSlammers — Quail Ridge OCR (Prefilled)</title>
+<style>
+  body{margin:0;font-family:system-ui,Arial;background:#0f1626;color:#e8eef5}
+  .wrap{max-width:1150px;margin:0 auto;padding:14px}
+  .card{background:#121b2b;border:1px solid #223047;border-radius:12px;padding:14px;margin-top:12px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  label{font-size:12px;color:#9fb0c5}
+  input,select,button{font:inherit}
+  input[type=number],select{background:#0e1423;border:1px solid #2a3a58;color:#e8eef5;border-radius:8px;padding:6px 8px}
+  button{border:1px solid #2a3a58;background:#1a2740;color:#e8eef5;border-radius:8px;padding:8px 12px;cursor:pointer}
+  button.primary{background:#2f6f3f;border-color:#2f6f3f}
+  #canvasWrap{position:relative;max-width:100%;overflow:auto}
+  #c{max-width:100%;border:1px solid #223047;border-radius:10px;background:#0b1220}
+  .pin{position:absolute;border:2px solid #22c55e;width:14px;height:14px;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
+  .muted{color:#9fb0c5;font-size:12px}
+  table{border-collapse:collapse;width:100%;min-width:720px}
+  th,td{border:1px solid #223047;padding:6px 8px;text-align:center}
+  thead th{background:#1a2740}
+  td.left,th.left{text-align:left}
+  .grid{overflow:auto}
+  .pill{display:inline-block;padding:4px 10px;border:1px solid #2a3a58;border-radius:999px;background:#0e1423;margin-right:6px}
+  .ok{color:#10b981} .bad{color:#ef4444}
+</style>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon.png">
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+      navigator.serviceWorker.register('service-worker.js').catch(function(e){console.log('SW fail', e);});
+    });
+  }
+</script>
+</head>
+<body>
+<div class="wrap">
+  <h2>PinSlammers — Quail Ridge OCR (Prefilled)</h2>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Scorecard Photo</label><br/>
+        <input id="file" type="file" accept="image/*"/>
+      </div>
+      <div>
+        <label>Players (rows)</label><br/>
+        <input id="rows" type="number" min="1" max="8" value="4" />
+      </div>
+      <div>
+        <label>Holes (columns)</label><br/>
+        <input id="cols" type="number" min="3" max="18" value="9" />
+      </div>
+      <div>
+        <label>Upscale (OCR)</label><br/>
+        <select id="scale">
+          <option value="1.5">1.5×</option>
+          <option value="2" selected>2×</option>
+          <option value="3">3×</option>
+        </select>
+      </div>
+      <div>
+        <label>B/W Threshold</label><br/>
+        <input id="thresh" type="number" min="0" max="255" value="170"/>
+      </div>
+      <button id="clearPins">Clear Selection</button>
+      <span class="muted">Click <strong>top‑left</strong> and <strong>bottom‑right</strong> of the scores grid.</span>
+    </div>
+
+    <div id="canvasWrap" class="card">
+      <canvas id="c" width="10" height="10"></canvas>
+      <div id="pinTL" class="pin" style="display:none"></div>
+      <div id="pinBR" class="pin" style="display:none"></div>
+    </div>
+
+    <div class="row" style="margin-top:8px">
+      <button id="runOCR" class="primary">Run OCR on Grid</button>
+      <span id="status" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Week</label><br/>
+        <select id="week"></select>
+      </div>
+      <div>
+        <label>Quail Ridge Side</label><br/>
+        <select id="side">
+          <option value="front" selected>Front 9 (Par 36)</option>
+          <option value="back">Back 9 (Par 36)</option>
+        </select>
+      </div>
+      <div>
+        <label>Team A</label><br/>
+        <select id="teamA"></select>
+      </div>
+      <div>
+        <label>Team B</label><br/>
+        <select id="teamB"></select>
+      </div>
+      <div>
+        <label>Handicaps (9‑hole)</label><br/>
+        <input id="ha1" type="number" min="0" max="36" value="0" placeholder="A1 HCP"/>
+        <input id="ha2" type="number" min="0" max="36" value="0" placeholder="A2 HCP"/>
+        <input id="hb1" type="number" min="0" max="36" value="0" placeholder="B1 HCP"/>
+        <input id="hb2" type="number" min="0" max="36" value="0" placeholder="B2 HCP"/>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:8px">
+      <table id="outTable">
+        <thead><tr id="hdr"><th>Player</th></tr></thead>
+        <tbody>
+          <tr data-r="0"><td class="left">A1</td></tr>
+          <tr data-r="1"><td class="left">A2</td></tr>
+          <tr data-r="2"><td class="left">B1</td></tr>
+          <tr data-r="3"><td class="left">B2</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="row" style="margin-top:8px">
+      <button id="apply" class="primary">Compute & Apply Points</button>
+      <button id="exportJSON">Export Current JSON</button>
+      <span id="applyMsg" class="muted"></span>
+    </div>
+    <div class="muted" style="margin-top:8px">
+      Rules: <span class="pill">Double‑par cap</span> <span class="pill">1 pt per hole low net</span> <span class="pill">+1 lower team NET total (both complete)</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 6px 0">Leaderboard Preview</h3>
+    <div class="grid" id="leader"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+(function(){
+var Teams=[{id:1,name:'Pac/Jack'},{id:2,name:'Ryan/Steve'},{id:3,name:'Kevin/Brian'},{id:4,name:'Jeff/Brian'},{id:5,name:'Tom/Mead'},{id:6,name:'Brock/Mason'},{id:7,name:'Austin/Justin'},{id:8,name:'Steve/Jason'},{id:9,name:'Chase/Brady'},{id:10,name:'Doug/John'},{id:11,name:'Andrew/Mike H'},{id:12,name:'Tedros/Chris'}];
+var byId={},byName={}; for(var i=0;i<Teams.length;i++){byId[Teams[i].id]=Teams[i].name; byName[Teams[i].name.toLowerCase()]=Teams[i].id;}
+var H1={1:[3,2.5,6,5.5,4,3.5,4.5,7],2:[7,8,4.5,2.5,4.5,3,5.5,0],3:[3.5,2.5,3.5,7.5,6.5,7.5,6,4],4:[3,2,3,4,0,6.5,4.5,6],5:[7.5,7.5,5.5,1.5,3.5,6,4.5,5],6:[6,7.5,4,6,6,8,4.5,5],7:[4,7,7,3,5.5,7,4,10],8:[7,7,6.5,4.5,6,6,5.5,0],9:[6.5,3,4.5,4,10,4,5.5,3],10:[3,3,6,8.5,4.5,2.5,4,0],11:[7,3,4,7,5.5,4,6,7],12:[2.5,7,5.5,6,4,2,5.5,3]};
+var H2={1:[7,6.5,3.5,5],2:[4.5,6.5,2.5,3.5],3:[3.5,6,6.5,7.5],4:[5.5,4.5,5.5,2.5],5:[4.5,4,6.5,5],6:[5.5,7,6.5,6],7:[3,3,6.5,5],8:[4.5,3.5,3.5,5],9:[2.5,4,7.5,4],10:[5.5,3.5,4.5,6.5],11:[7.5,5.5,3.5,2.5],12:[6.5,6,3.5,7.5]};
+try{ var a=localStorage.getItem('ps_H1'); if(a) H1=JSON.parse(a); var b=localStorage.getItem('ps_H2'); if(b) H2=JSON.parse(b);}catch(e){}
+function persist(){ try{ localStorage.setItem('ps_H1',JSON.stringify(H1)); localStorage.setItem('ps_H2',JSON.stringify(H2)); }catch(e){} }
+
+var CourseFront = { name:'Front 9', par:[4,3,5,4,4,3,4,5,4], hcp:[9,13,7,15,1,5,17,3,11] };
+var CourseBack  = { name:'Back 9',  par:[5,4,4,4,3,4,3,5,4], hcp:[6,12,2,14,10,8,16,18,4] };
+
+var file=document.getElementById('file'), c=document.getElementById('c'), ctx=c.getContext('2d'), wrap=document.getElementById('canvasWrap');
+var pinTL=document.getElementById('pinTL'), pinBR=document.getElementById('pinBR');
+var rowsEl=document.getElementById('rows'), colsEl=document.getElementById('cols'), scaleEl=document.getElementById('scale'), thrEl=document.getElementById('thresh');
+var runBtn=document.getElementById('runOCR'), statusEl=document.getElementById('status');
+var weekEl=document.getElementById('week'), teamAEl=document.getElementById('teamA'), teamBEl=document.getElementById('teamB'), sideEl=document.getElementById('side');
+var ha1=document.getElementById('ha1'), ha2=document.getElementById('ha2'), hb1=document.getElementById('hb1'), hb2=document.getElementById('hb2');
+var outTable=document.getElementById('outTable'), hdr=document.getElementById('hdr'), applyBtn=document.getElementById('apply'), applyMsg=document.getElementById('applyMsg'), exportBtn=document.getElementById('exportJSON');
+
+(function initSelectors(){
+  var weeks=[1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18];
+  for(var i=0;i<weeks.length;i++){ var op=document.createElement('option'); op.value=weeks[i]; op.textContent='Week '+weeks[i]; weekEl.appendChild(op); }
+  for(i=0;i<Teams.length;i++){
+    var a=document.createElement('option'); a.value=Teams[i].id; a.textContent=Teams[i].name; teamAEl.appendChild(a);
+    var b=document.createElement('option'); b.value=Teams[i].id; b.textContent=Teams[i].name; teamBEl.appendChild(b);
+  }
+  rebuildHeader();
+})();
+
+function rebuildHeader(){
+  while(hdr.firstChild) hdr.removeChild(hdr.firstChild);
+  var th=document.createElement('th'); th.textContent='Player'; hdr.appendChild(th);
+  var cols=+colsEl.value||9;
+  for(var j=1;j<=cols;j++){ var th2=document.createElement('th'); th2.textContent='H'+j; hdr.appendChild(th2); }
+  var body=outTable.tBodies[0];
+  for(var r=0;r<body.rows.length;r++){
+    var tr=body.rows[r];
+    while(tr.cells.length>1) tr.deleteCell(-1);
+    for(j=0;j<cols;j++){
+      var td=document.createElement('td'); var inp=document.createElement('input'); inp.type='number'; inp.min='1'; inp.max='20'; inp.style.width='56px';
+      td.appendChild(inp); tr.appendChild(td);
+    }
+  }
+}
+rowsEl.onchange=function(){
+  var want=+rowsEl.value||4, body=outTable.tBodies[0];
+  while(body.rows.length<want){ var tr=document.createElement('tr'); tr.setAttribute('data-r', body.rows.length); var td=document.createElement('td'); td.className='left'; td.textContent=(body.rows.length<2?'A':'B')+((body.rows.length%2)+1); tr.appendChild(td); body.appendChild(tr); }
+  while(body.rows.length>want){ body.deleteRow(-1); }
+  rebuildHeader();
+};
+colsEl.onchange=rebuildHeader;
+
+var img=null, tl=null, br=null;
+file.addEventListener('change', function(ev){
+  var f=ev.target.files && ev.target.files[0]; if(!f) return;
+  var rd=new FileReader(); rd.onload=function(){ img=new Image(); img.onload=function(){ c.width=img.width; c.height=img.height; ctx.drawImage(img,0,0); tl=br=null; pinTL.style.display='none'; pinBR.style.display='none'; }; img.src=rd.result; }; rd.readAsDataURL(f);
+});
+wrap.addEventListener('click', function(ev){
+  if(!img) return;
+  var rect=c.getBoundingClientRect();
+  var x=Math.round((ev.clientX-rect.left)*(c.width/rect.width));
+  var y=Math.round((ev.clientY-rect.top)*(c.height/rect.height));
+  if(!tl){ tl={x:x,y:y}; placePin(pinTL,x,y); }
+  else { br={x:x,y:y}; placePin(pinBR,x,y); drawBox(); }
+});
+document.getElementById('clearPins').onclick=function(){ tl=br=null; pinTL.style.display='none'; pinBR.style.display='none'; if(img){ ctx.drawImage(img,0,0);} };
+function placePin(el,x,y){
+  el.style.display='block';
+  var rect=c.getBoundingClientRect(), base=wrap.getBoundingClientRect();
+  el.style.left=(x*(rect.width/c.width)+rect.left - base.left)+'px';
+  el.style.top =(y*(rect.height/c.height)+rect.top  - base.top )+'px';
+}
+function drawBox(){ if(!img||!tl||!br) return; ctx.drawImage(img,0,0); ctx.strokeStyle='#22c55e'; ctx.lineWidth=3; ctx.strokeRect(tl.x, tl.y, br.x-tl.x, br.y-tl.y); }
+
+function cropCell(r,cIdx,rCount,cCount){
+  var x0=tl.x, y0=tl.y, w=br.x-tl.x, h=br.y-tl.y;
+  var cw=w/cCount, ch=h/rCount;
+  var x=Math.round(x0 + cIdx*cw), y=Math.round(y0 + r*ch);
+  var ww=Math.round(cw), hh=Math.round(ch);
+  var tmp=document.createElement('canvas'); tmp.width=ww; tmp.height=hh;
+  var tctx=tmp.getContext('2d'); tctx.drawImage(c, x,y, ww,hh, 0,0, ww,hh);
+  var scale=parseFloat(document.getElementById('scale').value||2), W=Math.round(ww*scale), H=Math.round(hh*scale);
+  var out=document.createElement('canvas'); out.width=W; out.height=H;
+  var octx=out.getContext('2d'); octx.imageSmoothingEnabled=false;
+  octx.drawImage(tmp,0,0,ww,hh,0,0,W,H);
+  var imgd=octx.getImageData(0,0,W,H), d=imgd.data, T=+document.getElementById('thresh').value||170;
+  for(var i=0;i<d.length;i+=4){ var v=(d[i]+d[i+1]+d[i+2])/3; var b=v<T?0:255; d[i]=d[i+1]=d[i+2]=b; d[i+3]=255; }
+  octx.putImageData(imgd,0,0);
+  return out;
+}
+function setGridValue(r,cIdx,val){
+  var tr=outTable.tBodies[0].rows[r]; if(!tr) return;
+  var inp=tr.cells[cIdx+1] && tr.cells[cIdx+1].querySelector('input'); if(inp) inp.value=val;
+}
+document.getElementById('runOCR').onclick=function(){
+  if(!img || !tl || !br){ statusEl.textContent='Choose an image and click top‑left & bottom‑right of the grid.'; return; }
+  var R=+rowsEl.value||4, C=+colsEl.value||9;
+  statusEl.textContent='OCR… ('+(R*C)+' cells)';
+  var whitelist='0123456789', jobs=[];
+  for(var r=0;r<R;r++){
+    for(var cIdx=0;cIdx<C;cIdx++){
+      (function(rr,cc){
+        var cellCanvas=cropCell(rr,cc,R,C);
+        jobs.push(
+          Tesseract.recognize(cellCanvas.toDataURL(),'eng',{ tessedit_char_whitelist:whitelist })
+          .then(function(res){
+            var txt=(res.data&&res.data.text||'').trim();
+            var m=txt.match(/\b([0-9]|1\d|2[0-0])\b/); var val=m?m[0]:'';
+            setGridValue(rr,cc,val);
+          })
+        );
+      })(r,cIdx);
+    }
+  }
+  Promise.allSettled(jobs).then(function(){ statusEl.innerHTML='<span class="ok">OCR complete. Review/edit, then Apply.</span>'; })
+  .catch(function(e){ statusEl.innerHTML='<span class="bad">OCR failed: '+(e.message||e)+'</span>'; });
+};
+
+function applyWeekPoints(week, teamId, pts){
+  if(week>=1 && week<=8){ var arr=H1[teamId]||(H1[teamId]=[]); arr[week-1]=pts; return; }
+  var idx=[10,11,12,13,14,15,16,17,18].indexOf(week);
+  if(idx>=0){ var arr2=H2[teamId]||(H2[teamId]=[]); arr2[idx]=pts; }
+}
+function sumArr(a){ for(var s=0,i=0;i<a.length;i++){ s+=(+a[i]||0);} return s; }
+function applyHcp(gross, hcpArr, playerHcp9){
+  var strokes=new Array(gross.length); for(var i=0;i<strokes.length;i++) strokes[i]=0;
+  var remain=Math.max(0, Math.floor(playerHcp9));
+  while(remain>0){
+    for(var rank=1; rank<=9 && remain>0; rank++){
+      for(var h=0; h<hcpArr.length; h++){ if(hcpArr[h]===rank && remain>0){ strokes[h]+=1; remain--; } }
+    }
+  }
+  var net=[]; for(i=0;i<gross.length;i++) net[i]=(gross[i]||0)-strokes[i];
+  return net;
+}
+var CourseFront = { par:[4,3,5,4,4,3,4,5,4], hcp:[9,13,7,15,1,5,17,3,11] };
+var CourseBack  = { par:[5,4,4,4,3,4,3,5,4], hcp:[6,12,2,14,10,8,16,18,4] };
+
+document.getElementById('apply').onclick=function(){
+  var R=outTable.tBodies[0].rows.length, C=+colsEl.value||9;
+  if(R<4 || C<3){ applyMsg.textContent='Fill at least 4 rows and 9 columns.'; return; }
+  var G=[]; for(var r=0;r<R;r++){ var row=[]; for(var cIdx=1;cIdx<=C;cIdx++){ var v=parseInt(outTable.tBodies[0].rows[r].cells[cIdx].querySelector('input').value,10); row.push(isNaN(v)?0:v); } G.push(row); }
+  var side=document.getElementById('side').value==='back'?'back':'front';
+  var course= side==='back' ? CourseBack : CourseFront;
+  for(var r=0;r<R;r++){ for(var h=0;h<C;h++){ var cap=(course.par[h]||5)*2; G[r][h]=Math.min(G[r][h]||0, cap); } }
+  var netA1=applyHcp(G[0], course.hcp, +ha1.value||0);
+  var netA2=applyHcp(G[1], course.hcp, +ha2.value||0);
+  var netB1=applyHcp(G[2], course.hcp, +hb1.value||0);
+  var netB2=applyHcp(G[3], course.hcp, +hb2.value||0);
+  var ptsA=0, ptsB=0;
+  for(var h=0;h<C;h++){
+    var aBest=Math.min(netA1[h], netA2[h]), bBest=Math.min(netB1[h], netB2[h]);
+    if(aBest<bBest) ptsA+=1; else if(bBest<aBest) ptsB+=1; else { ptsA+=0.5; ptsB+=0.5; }
+  }
+  var netTotA=sumArr(netA1)+sumArr(netA2), netTotB=sumArr(netB1)+sumArr(netB2);
+  if(netTotA<netTotB) ptsA+=1; else if(netTotB<netTotA) ptsB+=1; else { ptsA+=0.5; ptsB+=0.5; }
+  var wk=+weekEl.value, ta=+teamAEl.value, tb=+teamBEl.value;
+  applyWeekPoints(wk, ta, ptsA); applyWeekPoints(wk, tb, ptsB); persist();
+  document.getElementById('applyMsg').innerHTML='<span class="ok">Applied:</span> '+byId[ta]+' '+ptsA+' pts, '+byId[tb]+' '+ptsB+' pts (Week '+wk+', '+(side==='back'?'Back 9':'Front 9')+').';
+  renderLeader();
+};
+
+document.getElementById('exportJSON').onclick=function(){
+  var data=JSON.stringify({H1:H1,H2:H2},null,2);
+  var blob=new Blob([data],{type:'application/json'}), url=URL.createObjectURL(blob);
+  var a=document.createElement('a'); a.href=url; a.download='pinslammers_2025_points.json'; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){URL.revokeObjectURL(url);},500);
+};
+function renderLeader(){
+  var container=document.getElementById('leader'); container.innerHTML='';
+  container.appendChild(makeHalf('First Half • W1–8', [1,2,3,4,5,6,7,8], H1));
+  container.appendChild(makeHalf('Second Half • W10–18', [10,11,12,13,14,15,16,17,18], H2));
+}
+function makeHalf(title, weeks, dict){
+  var wrap=document.createElement('div'); wrap.className='grid';
+  var h=document.createElement('div'); h.textContent=title; h.style.margin='6px 0'; wrap.appendChild(h);
+  var table=document.createElement('table'), thead=document.createElement('thead'), trh=document.createElement('tr');
+  var th=document.createElement('th'); th.className='left'; th.textContent='Team'; trh.appendChild(th);
+  for(var i=0;i<weeks.length;i++){ th=document.createElement('th'); th.textContent='W'+weeks[i]; trh.appendChild(th); }
+  th=document.createElement('th'); th.textContent='Total'; trh.appendChild(th);
+  thead.appendChild(trh); table.appendChild(thead);
+  var tbody=document.createElement('tbody');
+  var rows=[];
+  for(var tid in dict){ if(!dict.hasOwnProperty(tid)) continue; 
+    var vals=[], total=0;
+    for(i=0;i<weeks.length;i++){
+      var w=weeks[i], v='';
+      if(w<=8) v=(H1[tid]||[])[w-1];
+      else { var idx=[10,11,12,13,14,15,16,17,18].indexOf(w); v=(H2[tid]||[])[idx]; }
+      vals.push(v===undefined?'':v); if(typeof v==='number') total+=v;
+    }
+    rows.push({name:byId[tid]||('Team '+tid), vals:vals, total:total});
+  }
+  rows.sort(function(a,b){return b.total-a.total;});
+  for(i=0;i<rows.length;i++){
+    var tr=document.createElement('tr'), td=document.createElement('td'); td.className='left'; td.textContent=rows[i].name; tr.appendChild(td);
+    for(var j=0;j<rows[i].vals.length;j++){ td=document.createElement('td'); td.textContent=(rows[i].vals[j]===''?'':rows[i].vals[j]); tr.appendChild(td); }
+    td=document.createElement('td'); td.textContent=rows[i].total; tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody); wrap.appendChild(table); return wrap;
+}
+renderLeader();
+
+})(); 
+</script>
+</body>
+</html>
